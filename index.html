@@ -70,11 +70,14 @@
           <div style="margin-top:8px">
             <div id="authArea">
               <div style="display:flex;gap:8px;margin-bottom:8px">
-                <input id="email" class="api" placeholder="Seu email" />
-              </div>
-              <div style="display:flex;gap:8px;margin-bottom:8px">
-                <input id="password" type="password" class="api" placeholder="Senha" />
-              </div>
+                  <input id="name" class="api" placeholder="Seu nome completo" />
+                </div>
+                <div style="display:flex;gap:8px;margin-bottom:8px">
+                  <input id="email" class="api" placeholder="Seu email" />
+                </div>
+                <div style="display:flex;gap:8px;margin-bottom:8px">
+                  <input id="phone" class="api" placeholder="Telefone (com DDD)" />
+                </div>
               <div style="display:flex;gap:10px">
                 <button id="loginBtn" class="btn">Entrar</button>
                 <button id="registerBtn" class="btn secondary">Criar conta</button>
@@ -129,11 +132,14 @@
     }
 
     document.getElementById('registerBtn').addEventListener('click', async ()=>{
-      const email = document.getElementById('email').value.trim();
-      const password = document.getElementById('password').value.trim();
-      if(!email || !password) return alert('Email e senha são obrigatórios');
+        const name = document.getElementById('name').value.trim();
+        const email = document.getElementById('email').value.trim();
+        const phone = document.getElementById('phone').value.trim();
+        if(!email) return alert('Email obrigatório');
+        try{
+          const r = await fetch('/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,email,phone})});
       try{
-        const r = await fetch('/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
+        const r = await fetch('/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,phone,password})});
         const j = await r.json();
         if(!r.ok) return alert('Erro: ' + (j.error||JSON.stringify(j)));
         localStorage.setItem('sessionToken', j.token);
@@ -145,17 +151,10 @@
     document.getElementById('loginBtn').addEventListener('click', async ()=>{
       const email = document.getElementById('email').value.trim();
       const password = document.getElementById('password').value.trim();
-      if(!email || !password) return alert('Email e senha são obrigatórios');
-      try{
-        const r = await fetch('/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
-        const j = await r.json();
-        if(!r.ok) return alert('Erro: ' + (j.error||JSON.stringify(j)));
-        localStorage.setItem('sessionToken', j.token);
-        alert('Logado');
-        showAuthState();
-      }catch(e){alert('Erro: '+e.message)}
-    });
-
+          const name = document.getElementById('name').value.trim();
+          const email = document.getElementById('email').value.trim();
+          const phone = document.getElementById('phone').value.trim();
+          const payer = { name, email, phone };
     document.getElementById('logoutBtn').addEventListener('click', ()=>{
       localStorage.removeItem('sessionToken');
       showAuthState();
@@ -164,7 +163,17 @@
     document.getElementById('buyBtn').addEventListener('click', async ()=>{
       try{
         document.getElementById('buyBtn').disabled = true;
-        const data = await createPayment();
+        // pass payer info from local session if available
+        const token = localStorage.getItem('sessionToken');
+        let payer = null;
+        if (token) {
+          // request /me to obtain email/phone
+          try {
+            const me = await fetch('/me', { headers: { Authorization: 'Bearer ' + token } });
+            if (me.ok) payer = await me.json();
+          } catch (e) { /* ignore */ }
+        }
+        const data = await createPayment(payer);
         if(data && data.init_point) { window.location.href = data.init_point; }
         else if(data && data.pix){
           const txt = JSON.stringify(data.pix, null, 2);
