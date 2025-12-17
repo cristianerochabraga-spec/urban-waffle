@@ -1,0 +1,104 @@
+import express from 'express';
+import fs from 'fs';
+import path from 'path';
+import dotenv from 'dotenv';
+import { randomUUID } from 'crypto';
+import { createClient } from 'redis';
+import cors from 'cors';
+
+dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
+
+// Access token disponível em process.env.MP_ACCESS_TOKEN
+const allowedOrigin = process.env.ALLOWED_ORIGIN || 'http://localhost:3000';
+
+// sessão de tokens temporários para o front-end (esconde a MP_SERVER_KEY)
+// Use Redis quando REDIS_URL estiver definido; caso contrário, fallback para memória.
+let redisClient = null;
+const useRedis = !!process.env.REDIS_URL;
+if (useRedis) {
+  redisClient = createClient({ url: process.env.REDIS_URL });
+  redisClient.on('error', (err) => console.error('Redis error', err));
+  // connect async but don't block startup
+  redisClient.connect().then(() => console.log('Connected to Redis')).catch((e) => console.error('Redis connect failed', e));
+}
+
+const sessionTokens = new Map(); // token -> expiresAt (ms) — usado apenas quando não há Redis
+// limpa tokens expirados a cada minuto (apenas para fallback em memória)
+setInterval(() => {
+  if (useRedis) return;
+  const now = Date.now();
+  for (const [t, exp] of sessionTokens) {
+    if (exp < now) sessionTokens.delete(t);
+  }
+}, 60 * 1000);
+
+const app = express();
+app.use(express.json());
+app.use(cors({ origin: allowedOrigin }));
+app.use(express.static(process.cwd()));
+
+app.get('/config', (req, res) => {
+  const cfgPath = path.resolve(process.cwd(), 'public-config.json');
+  if (fs.existsSync(cfgPath)) {
+    const data = fs.readFileSync(cfgPath, 'utf8');
+    return res.type('application/json').send(data);
+  }
+  return res.status(404).json({ error: 'config not found' });
+});
+
+// Gera um token de sessão de curta duração para o front-end (origin deve ser allowedOrigin)
+// Session tokens disabled: frontend must send x-api-key (server key) with requests.
+
+// Middleware de autenticação condicional:
+// - Requests da origem `allowedOrigin` são permitidas sem chave
+// - Outras origens precisam enviar `x-api-key` com MP_SERVER_KEY
+function requireAuth(req, res, next) {
+  // Sempre exigir chave do servidor via header `x-api-key` ou query `?api_key=`.
+  const key = req.get('x-api-key') || req.query.api_key;
+  if (!key || key !== process.env.MP_SERVER_KEY) {
+    return res.status(401).json({ error: 'Unauthorized: missing or invalid api key' });
+  }
+  return next();
+}
+
+app.post('/create-payment', requireAuth, async (req, res) => {
+  try {
+    let items = [];
+    if (Array.isArray(req.body.items) && req.body.items.length > 0) {
+      items = req.body.items.map((it) => ({
+        title: it.title,
+        quantity: Number(it.quantity) || 1,
+        currency_id: it.currency_id || 'BRL',
+        unit_price: Number(it.unit_price) || Number(it.price) || 0
+      }));
+    } else if (req.body.title) {
+      items = [
+        {
+          title: req.body.title,
+          quantity: Number(req.body.quantity) || 1,
+          currency_id: req.body.currency_id || 'BRL',
+          unit_price: Number(req.body.unit_price) || Number(req.body.price) || 0
+        }
+      ];
+    } else {
+      items = [{ title: 'Livro Digital', quantity: 1, currency_id: 'BRL', unit_price: 5.0 }];
+    }
+
+    const preference = { items, back_urls: { success: 'https://SEU_SITE.vercel.app/sucesso', failure: 'https://SEU_SITE.vercel.app/erro', pending: 'https://SEU_SITE.vercel.app/pendente' }, auto_return: 'approved' };
+
+    const apiRes = await fetch('https://api.mercadopago.com/checkout/preferences', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.MP_ACCESS_TOKEN}` },
+      body: JSON.stringify(preference)
+    });
+
+    const json = await apiRes.json();
+    if (!apiRes.ok) return res.status(apiRes.status).json({ error: json });
+    return res.status(200).json({ init_point: json.init_point });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+const port = process.env.PORT || 3000;
+app.listen(port, () => console.log(`Servidor rodando em http://localhost:${port}`));

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Checkout MercadoPago</title>
+  <script src="https://sdk.mercadopago.com/js/v2"></script>
+</head>
+<body>
+  <h1>Demo MercadoPago</h1>
+  <form id="checkout-form">
+    <label>Título: <input type="text" id="title" value="Livro Digital" required></label>
+    <label>Quantidade: <input type="number" id="quantity" value="1" min="1" required></label>
+    <label>Preço (un): <input type="number" id="price" value="5.00" step="0.01" required></label>
+    <label>API Key (x-api-key): <input type="text" id="apiKey" placeholder="Insira a chave do servidor" required></label>
+    <button type="submit">Pagar</button>
+  </form>
+
+  <script>
+    // Carrega a configuração pública do servidor
+    async function init() {
+      const res = await fetch('/config');
+      if (!res.ok) {
+        console.error('Não foi possível obter config pública');
+        return;
+      }
+      const cfg = await res.json();
+      const publicKey = cfg.publicKey;
+
+      const mp = new MercadoPago(publicKey, { locale: 'pt-BR' });
+
+      const form = document.getElementById('checkout-form');
+      form.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const title = document.getElementById('title').value;
+        const quantity = Number(document.getElementById('quantity').value) || 1;
+        const price = Number(document.getElementById('price').value) || 0;
+
+        const apiKey = document.getElementById('apiKey').value;
+        const body = { items: [{ title, quantity, currency_id: 'BRL', unit_price: price }] };
+        const r = await fetch('/create-payment', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey }, body: JSON.stringify(body) });
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}));
+          alert('Erro ao criar pagamento: ' + (err.error?.message || JSON.stringify(err)));
+          return;
+        }
+        const data = await r.json();
+        window.location.href = data.init_point;
+      });
+    }
+
+    init();
+  </script>
+</body>
+</html>
