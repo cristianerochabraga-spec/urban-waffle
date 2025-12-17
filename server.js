@@ -2,7 +2,7 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
-import { randomUUID } from 'crypto';
+import { randomUUID, createHash } from 'crypto';
 import { createClient } from 'redis';
 import cors from 'cors';
 
@@ -22,13 +22,15 @@ if (useRedis) {
   redisClient.connect().then(() => console.log('Connected to Redis')).catch((e) => console.error('Redis connect failed', e));
 }
 
-const sessionTokens = new Map(); // token -> expiresAt (ms) — usado apenas quando não há Redis
+// sessionTokens: token -> { email, expiresAt }
+const sessionTokens = new Map(); // usado quando não há Redis
+const users = new Map(); // email -> { passwordHash, phone }
 // limpa tokens expirados a cada minuto (apenas para fallback em memória)
 setInterval(() => {
   if (useRedis) return;
   const now = Date.now();
-  for (const [t, exp] of sessionTokens) {
-    if (exp < now) sessionTokens.delete(t);
+  for (const [t, v] of sessionTokens) {
+    if (!v || v.expiresAt < now) sessionTokens.delete(t);
   }
 }, 60 * 1000);
 
@@ -53,15 +55,39 @@ app.get('/config', (req, res) => {
 // - Requests da origem `allowedOrigin` são permitidas sem chave
 // - Outras origens precisam enviar `x-api-key` com MP_SERVER_KEY
 function requireAuth(req, res, next) {
-  // Sempre exigir chave do servidor via header `x-api-key` ou query `?api_key=`.
-  const key = req.get('x-api-key') || req.query.api_key;
-  if (!key || key !== process.env.MP_SERVER_KEY) {
-    return res.status(401).json({ error: 'Unauthorized: missing or invalid api key' });
+  // Permite autenticação via session token Bearer ou via x-api-key (server key)
+  const auth = req.get('authorization') || req.get('x-session-token');
+  if (auth && auth.toLowerCase().startsWith('bearer ')) {
+    const token = auth.slice(7).trim();
+    if (useRedis) {
+      // Redis-backed sessions not implemented in this demo path
+    } else {
+      const rec = sessionTokens.get(token);
+      if (rec && rec.expiresAt > Date.now()) {
+        req.user = { email: rec.email };
+        return next();
+      }
+    }
   }
-  return next();
+  // also accept raw token in header x-session-token
+  const raw = req.get('x-session-token');
+  if (raw) {
+    const token = raw.trim();
+    const rec = sessionTokens.get(token);
+    if (rec && rec.expiresAt > Date.now()) {
+      req.user = { email: rec.email };
+      return next();
+    }
+  }
+
+  // fallback: accept server key for API clients
+  const key = req.get('x-api-key') || req.query.api_key;
+  if (key && key === process.env.MP_SERVER_KEY) return next();
+
+  return res.status(401).json({ error: 'Unauthorized: missing or invalid credentials' });
 }
 
-app.post('/create-payment', requireAuth, async (req, res) => {
+app.post('/create-payment', async (req, res) => {
   try {
     let items = [];
     if (Array.isArray(req.body.items) && req.body.items.length > 0) {
@@ -84,7 +110,59 @@ app.post('/create-payment', requireAuth, async (req, res) => {
       items = [{ title: 'Livro Digital', quantity: 1, currency_id: 'BRL', unit_price: 5.0 }];
     }
 
+    // Validação rápida de configuração
+    if (!process.env.MP_ACCESS_TOKEN) {
+      return res.status(500).json({ error: 'MP_ACCESS_TOKEN not configured on server. Set MP_ACCESS_TOKEN in .env.local' });
+    }
+
+    // Se o front pedir especificamente PIX, criaremos um Payment (PIX) diretamente
+    const method = (req.body.method || '').toLowerCase();
+
+    if (method === 'pix') {
+      // calcula o valor total
+      const total = items.reduce((s, it) => s + (Number(it.unit_price || 0) * Number(it.quantity || 1)), 0);
+      // prefer payer from body, then authenticated user (req.user), then fallback to request email
+      const payer = req.body.payer || req.user || { email: req.body.email || 'payer@example.com' };
+
+      const paymentBody = {
+        transaction_amount: Number(total),
+        description: items.map(i => i.title).join(', '),
+        payment_method_id: 'pix',
+        payer
+      };
+
+      const payRes = await fetch('https://api.mercadopago.com/v1/payments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.MP_ACCESS_TOKEN}` },
+        body: JSON.stringify(paymentBody)
+      });
+
+      const payJson = await payRes.json();
+      if (!payRes.ok) {
+        // melhorar mensagem para 401 de credenciais
+        if (payRes.status === 401) return res.status(401).json({ error: 'MercadoPago unauthorized: check MP_ACCESS_TOKEN (live vs sandbox).' , detail: payJson });
+        return res.status(payRes.status).json({ error: payJson });
+      }
+
+      // Retorna informações úteis do PIX ao frontend (qr_code, qr_code_base64, transaction_data)
+      const poi = payJson.point_of_interaction || {};
+      return res.status(200).json({ payment: payJson, pix: poi.transaction_data || poi });
+    }
+
+    // Comportamento padrão: criar preferência (Checkout) — permite múltiplos métodos
     const preference = { items, back_urls: { success: 'https://SEU_SITE.vercel.app/sucesso', failure: 'https://SEU_SITE.vercel.app/erro', pending: 'https://SEU_SITE.vercel.app/pendente' }, auto_return: 'approved' };
+
+    // incluir dados do pagador quando fornecidos pelo frontend
+    const incomingPayer = req.body.payer || { email: req.body.email, name: req.body.name, phone: req.body.phone };
+    if (incomingPayer && incomingPayer.email) {
+      const payer = { email: incomingPayer.email };
+      if (incomingPayer.name) payer.name = incomingPayer.name;
+      const rawPhone = String(incomingPayer.phone || '').replace(/\D/g, '');
+      if (rawPhone.length >= 10) {
+        payer.phone = { area_code: rawPhone.slice(0, 2), number: rawPhone.slice(2) };
+      }
+      preference.payer = payer;
+    }
 
     const apiRes = await fetch('https://api.mercadopago.com/checkout/preferences', {
       method: 'POST',
@@ -93,12 +171,62 @@ app.post('/create-payment', requireAuth, async (req, res) => {
     });
 
     const json = await apiRes.json();
-    if (!apiRes.ok) return res.status(apiRes.status).json({ error: json });
+    if (!apiRes.ok) {
+      if (apiRes.status === 401) return res.status(401).json({ error: 'MercadoPago unauthorized: check MP_ACCESS_TOKEN (live vs sandbox).', detail: json });
+      return res.status(apiRes.status).json({ error: json });
+    }
     return res.status(200).json({ init_point: json.init_point });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
 });
+
+  // Registro simples de usuário (demo). Retorna token de sessão.
+  app.post('/register', (req, res) => {
+    const { email, password, phone } = req.body || {};
+    if (!email || !password) return res.status(400).json({ error: 'email and password required' });
+    const key = email.toLowerCase();
+    if (users.has(key)) return res.status(409).json({ error: 'user exists' });
+    const hash = createHash('sha256').update(password).digest('hex');
+    users.set(key, { passwordHash: hash, phone: phone || null });
+    const token = randomUUID();
+    const expiresAt = Date.now() + 24 * 60 * 60 * 1000; // 24h
+    sessionTokens.set(token, { email: key, phone: phone || null, expiresAt });
+    return res.status(201).json({ token, expiresAt });
+  });
+
+  app.post('/login', (req, res) => {
+    const { email, password } = req.body || {};
+    if (!email || !password) return res.status(400).json({ error: 'email and password required' });
+    const key = email.toLowerCase();
+    const rec = users.get(key);
+    if (!rec) return res.status(401).json({ error: 'invalid credentials' });
+    const hash = createHash('sha256').update(password).digest('hex');
+    if (hash !== rec.passwordHash) return res.status(401).json({ error: 'invalid credentials' });
+    const token = randomUUID();
+    const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
+    sessionTokens.set(token, { email: key, phone: rec.phone || null, expiresAt });
+    return res.json({ token, expiresAt });
+  });
+
+  app.get('/me', (req, res) => {
+    // retorna informação do usuário autenticado
+    const auth = req.get('authorization');
+    if (!auth || !auth.toLowerCase().startsWith('bearer ')) return res.status(401).json({ error: 'not authenticated' });
+    const token = auth.slice(7).trim();
+    const rec = sessionTokens.get(token);
+    if (!rec || rec.expiresAt < Date.now()) return res.status(401).json({ error: 'not authenticated' });
+    return res.json({ email: rec.email });
+  });
+
+  // Debug: listar sessões ativas (apenas em dev)
+  if (process.env.NODE_ENV !== 'production') {
+    app.get('/debug-sessions', (req, res) => {
+      const out = {};
+      for (const [t, v] of sessionTokens) out[t] = { email: v.email, expiresAt: v.expiresAt };
+      return res.json(out);
+    });
+  }
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Servidor rodando em http://localhost:${port}`));
