@@ -84,6 +84,36 @@ app.post('/create-payment', requireAuth, async (req, res) => {
       items = [{ title: 'Livro Digital', quantity: 1, currency_id: 'BRL', unit_price: 5.0 }];
     }
 
+    // Se o front pedir especificamente PIX, criaremos um Payment (PIX) diretamente
+    const method = (req.body.method || '').toLowerCase();
+
+    if (method === 'pix') {
+      // calcula o valor total
+      const total = items.reduce((s, it) => s + (Number(it.unit_price || 0) * Number(it.quantity || 1)), 0);
+      const payer = req.body.payer || { email: req.body.email || 'payer@example.com' };
+
+      const paymentBody = {
+        transaction_amount: Number(total),
+        description: items.map(i => i.title).join(', '),
+        payment_method_id: 'pix',
+        payer
+      };
+
+      const payRes = await fetch('https://api.mercadopago.com/v1/payments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.MP_ACCESS_TOKEN}` },
+        body: JSON.stringify(paymentBody)
+      });
+
+      const payJson = await payRes.json();
+      if (!payRes.ok) return res.status(payRes.status).json({ error: payJson });
+
+      // Retorna informações úteis do PIX ao frontend (qr_code, qr_code_base64, transaction_data)
+      const poi = payJson.point_of_interaction || {};
+      return res.status(200).json({ payment: payJson, pix: poi.transaction_data || poi });
+    }
+
+    // Comportamento padrão: criar preferência (Checkout) — permite múltiplos métodos
     const preference = { items, back_urls: { success: 'https://SEU_SITE.vercel.app/sucesso', failure: 'https://SEU_SITE.vercel.app/erro', pending: 'https://SEU_SITE.vercel.app/pendente' }, auto_return: 'approved' };
 
     const apiRes = await fetch('https://api.mercadopago.com/checkout/preferences', {
