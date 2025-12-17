@@ -3,53 +3,121 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Checkout MercadoPago</title>
-  <script src="https://sdk.mercadopago.com/js/v2"></script>
+  <title>Curso Rápido — Marketing Digital</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root{--bg:#0f1724;--card:#0b1220;--accent:#7c3aed;--muted:#94a3b8;--glass:rgba(255,255,255,0.03)}
+    html,body{height:100%;margin:0;font-family:Inter,system-ui,Roboto,Arial,sans-serif;background:linear-gradient(180deg,#071124 0%, #071b2a 60%);color:#e6eef8}
+    .wrap{min-height:100%;display:flex;align-items:center;justify-content:center;padding:48px}
+    .card{width:100%;max-width:980px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));box-shadow:0 10px 30px rgba(2,6,23,0.6);border-radius:14px;display:grid;grid-template-columns:1fr 420px;gap:28px;padding:36px}
+    .hero{padding:8px 12px}
+    h1{margin:0 0 12px;font-size:28px;letter-spacing:-0.02em}
+    p.lead{margin:0 0 20px;color:var(--muted);font-size:15px;line-height:1.6}
+    .features{display:flex;gap:12px;margin-top:18px}
+    .feat{background:var(--glass);padding:12px;border-radius:10px;color:#cfe4ff;font-size:14px}
+    .product{background:linear-gradient(180deg,#07182b,#071226);padding:20px;border-radius:12px;color:#fff;border:1px solid rgba(255,255,255,0.03)}
+    .price{font-size:28px;font-weight:700;color:var(--accent)}
+    .btn{display:inline-block;padding:12px 18px;border-radius:10px;background:linear-gradient(90deg,var(--accent),#5b21b6);color:white;text-decoration:none;border:none;cursor:pointer;font-weight:600}
+    .muted{color:var(--muted);font-size:13px}
+    .meta{margin-top:14px;font-size:13px;color:var(--muted)}
+    .right{padding:6px}
+    .checkout-panel{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));padding:20px;border-radius:12px;border:1px solid rgba(255,255,255,0.03)}
+    input.api{width:100%;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:#e6eef8}
+    footer{margin-top:20px;text-align:center;color:var(--muted);font-size:13px}
+    @media(max-width:880px){.card{grid-template-columns:1fr;padding:24px}.price{font-size:24px}}
+  </style>
 </head>
 <body>
-  <h1>Demo MercadoPago</h1>
-  <form id="checkout-form">
-    <label>Título: <input type="text" id="title" value="Livro Digital" required></label>
-    <label>Quantidade: <input type="number" id="quantity" value="1" min="1" required></label>
-    <label>Preço (un): <input type="number" id="price" value="5.00" step="0.01" required></label>
-    <label>API Key (x-api-key): <input type="text" id="apiKey" placeholder="Insira a chave do servidor" required></label>
-    <button type="submit">Pagar</button>
-  </form>
+  <div class="wrap">
+    <div class="card">
+      <section class="hero">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px">
+          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="24" height="24" rx="6" fill="#0b1220"/></svg>
+          <div>
+            <div style="font-size:12px;color:var(--accent);font-weight:700">Lançamento</div>
+            <h1>Curso Rápido de Growth Marketing</h1>
+          </div>
+        </div>
+        <p class="lead">Aprenda técnicas práticas de aquisição, conversão e retenção em passos curtos. Ideal para quem quer começar a vender online — sem teorias longas.</p>
+
+        <div class="features">
+          <div class="feat">Aulas diretas ao ponto</div>
+          <div class="feat">Exercícios práticos</div>
+          <div class="feat">Checklist de lançamento</div>
+        </div>
+
+        <div style="margin-top:22px" class="meta">Inclui: 4 módulos, materiais em PDF e modelo de landing pronto.</div>
+        <footer>Pagamento via MercadoPago • Seguro e rápido</footer>
+      </section>
+
+      <aside class="right">
+        <div class="checkout-panel">
+          <div class="product">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div>
+                <div style="font-size:14px;color:var(--muted)">Curso Rápido</div>
+                <div style="font-weight:600">Growth Marketing — Básico</div>
+              </div>
+              <div class="price">R$ 5,00</div>
+            </div>
+            <div class="meta">Acesso vitalício • Atualizações inclusas</div>
+          </div>
+
+          <div style="margin-top:14px">
+            <label class="muted">Chave do servidor (x-api-key)</label>
+            <input id="apiKey" class="api" placeholder="Digite sua x-api-key aqui" />
+          </div>
+
+          <div style="margin-top:14px;display:flex;gap:10px">
+            <button id="buyBtn" class="btn">Comprar agora</button>
+            <button id="demoBtn" class="btn" style="background:transparent;border:1px solid rgba(255,255,255,0.06)">Ver demo</button>
+          </div>
+
+          <div style="margin-top:12px" class="muted">Ao clicar em Comprar, você será redirecionado ao checkout do MercadoPago.</div>
+        </div>
+      </aside>
+    </div>
+  </div>
 
   <script>
-    // Carrega a configuração pública do servidor
-    async function init() {
-      const res = await fetch('/config');
-      if (!res.ok) {
-        console.error('Não foi possível obter config pública');
-        return;
-      }
-      const cfg = await res.json();
-      const publicKey = cfg.publicKey;
-
-      const mp = new MercadoPago(publicKey, { locale: 'pt-BR' });
-
-      const form = document.getElementById('checkout-form');
-      form.addEventListener('submit', async (ev) => {
-        ev.preventDefault();
-        const title = document.getElementById('title').value;
-        const quantity = Number(document.getElementById('quantity').value) || 1;
-        const price = Number(document.getElementById('price').value) || 0;
-
-        const apiKey = document.getElementById('apiKey').value;
-        const body = { items: [{ title, quantity, currency_id: 'BRL', unit_price: price }] };
-        const r = await fetch('/create-payment', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey }, body: JSON.stringify(body) });
-        if (!r.ok) {
-          const err = await r.json().catch(() => ({}));
-          alert('Erro ao criar pagamento: ' + (err.error?.message || JSON.stringify(err)));
-          return;
-        }
-        const data = await r.json();
-        window.location.href = data.init_point;
-      });
+    async function getPublicKey(){
+      try{
+        const r = await fetch('/config');
+        if(!r.ok) return null;
+        const j = await r.json();
+        return j.publicKey;
+      }catch(e){return null}
     }
 
-    init();
+    async function createPayment(apiKey){
+      const body = { items: [{ title: 'Growth Marketing — Básico', quantity: 1, currency_id: 'BRL', unit_price: 5.0 }] };
+      const res = await fetch('/create-payment', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey }, body: JSON.stringify(body) });
+      if(!res.ok){
+        const err = await res.json().catch(()=>({error:'unknown'}));
+        throw new Error(err.error || JSON.stringify(err));
+      }
+      return res.json();
+    }
+
+    document.getElementById('buyBtn').addEventListener('click', async () => {
+      let apiKey = document.getElementById('apiKey').value.trim();
+      if(!apiKey){
+        apiKey = prompt('Insira sua chave do servidor (x-api-key) para criar o pagamento:');
+        if(!apiKey) return alert('Chave necessária para processar o pagamento.');
+      }
+      try{
+        document.getElementById('buyBtn').disabled = true;
+        const data = await createPayment(apiKey);
+        if(data && data.init_point){ window.location.href = data.init_point; }
+        else alert('Resposta inesperada do servidor.');
+      }catch(err){
+        alert('Erro: ' + (err.message || err));
+      }finally{ document.getElementById('buyBtn').disabled = false; }
+    });
+
+    document.getElementById('demoBtn').addEventListener('click', async ()=>{
+      alert('Demo: preço R$5, checkout via MercadoPago.');
+    });
   </script>
 </body>
 </html>
